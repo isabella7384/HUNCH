@@ -1,0 +1,133 @@
+//This code allows for the system of EMMA, our landing leg and payload release system rocket, to lower
+//automatically the payloads assigned.
+
+
+//Defining the variables
+#include <math.h>  // For fabs()
+
+#define TRIG_PIN_1 9  
+#define ECHO_PIN_1 10
+#define TRIG_PIN_2 7
+#define ECHO_PIN_2 8
+#define LED_PIN 6
+#define BUZZER_PIN 5
+#define MOTOR_PIN 3  // Pin to control transistor for motor
+
+unsigned long systemStartTime = 0;  
+unsigned long motorStartTime = 0;  
+unsigned long distanceMatchStartTime = 0;  
+
+bool systemActivated = false;  
+bool motorRunning = false;  
+bool motorStoppedForever = false;  // Flag to permanently stop motor
+
+//Code to read the distance sensors
+void setup() {
+  pinMode(TRIG_PIN_1, OUTPUT);
+  pinMode(ECHO_PIN_1, INPUT);
+  pinMode(TRIG_PIN_2, OUTPUT);
+  pinMode(ECHO_PIN_2, INPUT);
+  pinMode(LED_PIN, OUTPUT);
+  pinMode(BUZZER_PIN, OUTPUT);
+  pinMode(MOTOR_PIN, OUTPUT);  // Set MOTOR_PIN as an output
+  
+  Serial.begin(9600);
+}
+
+float getDistance(int trigPin, int echoPin) {
+  long duration;
+  float distance;
+
+  digitalWrite(trigPin, LOW);
+  delayMicroseconds(2);
+  digitalWrite(trigPin, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(trigPin, LOW);
+
+  duration = pulseIn(echoPin, HIGH, 30000);
+  if (duration == 0)
+    return -1;  // No valid reading
+
+  distance = (duration * 0.0343) / 2;
+  return distance;
+}
+
+//Begining of the main code
+void loop() {
+  // Read sensor values
+  float distance1 = getDistance(TRIG_PIN_1, ECHO_PIN_1);
+  delay(50);
+  float distance2 = getDistance(TRIG_PIN_2, ECHO_PIN_2);
+  delay(50);
+
+  Serial.print("Sensor 1: ");
+  Serial.print(distance1);
+  Serial.print(" cm | Sensor 2: ");
+  Serial.print(distance2);
+  Serial.println(" cm");
+
+  // If the system isn't activated, check sensor conditions
+  if (!systemActivated) {
+    if (distance1 > 0 && distance2 > 0) {
+      if (distance1 >= 8 && distance1 <= 16 && distance2 >= 8 && distance2 <= 16) {
+        if (fabs(distance1 - distance2) <= 3) {  // Using fabs for float differences
+          if (distanceMatchStartTime == 0) {
+            distanceMatchStartTime = millis();
+            Serial.println("Sensor conditions met. Timer started...");
+          } else if (millis() - distanceMatchStartTime >= 4000) {  // 4 seconds elapsed
+            systemActivated = true;
+            systemStartTime = millis();
+            Serial.println("System ACTIVATED!");
+          }
+        } else {
+          distanceMatchStartTime = 0;
+        }
+      } else {
+        distanceMatchStartTime = 0;
+      }
+    } else {
+      distanceMatchStartTime = 0;
+    }
+  }
+
+  // If system is activated, run the sequence based on elapsed time
+  if (systemActivated) {
+    unsigned long elapsedTime = millis() - systemStartTime;
+    Serial.print("Elapsed Time: ");
+    Serial.println(elapsedTime);
+
+    // LED control: ON only between 3 and 19 seconds
+    if (elapsedTime < 3000) {
+      digitalWrite(LED_PIN, LOW);
+    } else if (elapsedTime >= 3000 && elapsedTime < 19000) {
+      digitalWrite(LED_PIN, HIGH);
+    } else {
+      digitalWrite(LED_PIN, LOW);
+    }
+
+    // Buzzer on between 5 and 8 seconds
+    if (elapsedTime >= 5000 && elapsedTime < 8000) {
+      tone(BUZZER_PIN, 329);  // 329 Hz is the Mi/E note.
+    } else {
+      noTone(BUZZER_PIN);
+    }
+
+    // Start motor at 10 seconds
+    if (elapsedTime >= 10000 && !motorRunning && !motorStoppedForever) {
+      digitalWrite(MOTOR_PIN, HIGH);  // Turn motor ON via transistor
+      motorStartTime = millis();
+      motorRunning = true;
+      Serial.println("Motor started");
+    }
+
+    // Turn off motor after 6 seconds of running, permanently
+    if (motorRunning && (millis() - motorStartTime >= 6000)) {
+      digitalWrite(MOTOR_PIN, LOW);  // Turn motor OFF via transistor
+      motorRunning = false;
+      motorStoppedForever = true;  // Permanently stop motor
+      Serial.println("Motor stopped");
+    }
+  }
+
+  delay(500);  // Small delay for stability
+}
